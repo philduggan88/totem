@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0a0710">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Totem">
+<title>Totem — friend-finding compass</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg class="kite" viewBox="0 0 100 100" aria-hidden="true">
+      <use href="icon.svg#kite"></use>
+    </svg>
+    <div class="brand-text">
+      <h1>totem</h1>
+      <p id="groupName">—</p>
+    </div>
+  </div>
+  <div class="head-right">
+    <span id="festival" class="festival">—</span>
+    <span id="syncPill" class="pill offline">NO GPS</span>
+  </div>
+</header>
+
+<main>
+  <p id="hint" class="hint">Signal lost. Friends found. — dots sit at the true direction of each friend; tap one to track them.</p>
+
+  <div id="compassWrap" title="Tap to switch ring / radar view">
+    <div class="puck">
+      <div class="puck-gloss"></div>
+      <div id="dial">
+        <div class="ring-ticks"></div>
+        <span class="cardinal n">N</span>
+        <span class="cardinal e">E</span>
+        <span class="cardinal s">S</span>
+        <span class="cardinal w">W</span>
+        <div id="dots"></div>
+      </div>
+      <div id="centerReadout">
+        <svg class="kite big" id="centerKite" viewBox="0 0 100 100" aria-hidden="true">
+          <use href="icon.svg#kite"></use>
+        </svg>
+        <div id="targetName">&nbsp;</div>
+        <div id="targetDist">&nbsp;</div>
+        <div id="targetSeen">&nbsp;</div>
+      </div>
+      <div id="headingNeedle" title="Where you're pointing"></div>
+    </div>
+  </div>
+
+  <div id="chips"></div>
+</main>
+
+<footer>
+  <button id="btnView">◎ Radar</button>
+  <button id="btnTotem">⚑ Drop Totem</button>
+  <button id="btnCompassPerm" hidden>🧭 Enable compass</button>
+  <button id="btnDemo" class="on">▶ Demo</button>
+  <button id="btnWho">☺ I am…</button>
+  <button id="btnExport">⇩ Export crew</button>
+  <button id="btnImport">⇧ Import crew</button>
+  <input id="importFile" type="file" accept="application/json,.json" hidden>
+</footer>
+
+<dialog id="whoDialog">
+  <h2>Who are you?</h2>
+  <p>Your dot follows this device's GPS. Everyone else follows theirs.</p>
+  <div id="whoList"></div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
