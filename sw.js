@@ -2,7 +2,7 @@
    instantly (works fully offline from the home screen), refresh the cache in
    the background whenever the network answers. */
 
-const CACHE = "totem-mobile-v1";
+const CACHE = "totem-mobile-v2";
 const SHELL = [
   "./", "index.html", "style.css", "app.js", "icon.svg", "manifest.json",
   "icon-192.png", "icon-512.png", "apple-touch-icon.png",
@@ -23,6 +23,8 @@ self.addEventListener("activate", (e) => {
 });
 
 self.addEventListener("fetch", (e) => {
+  const url = new URL(e.request.url);
+  if (url.origin !== location.origin) return; // sync worker calls: network-only
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((hit) => {
       const refresh = fetch(e.request)

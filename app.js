@@ -31,7 +31,13 @@ const state = {
   radar: false,
   demo: localStorage.getItem("totem.demo") !== "off",
   gpsFix: false,
+  sync: JSON.parse(localStorage.getItem("totem.sync") || "null"), // {url, code}
+  lastSync: 0,
+  online: false,
 };
+
+const SYNC_MS = 4000;
+const seededIdentities = new Set(); // members whose name/color we pushed this session
 
 // ---------- geo math ----------
 
@@ -114,6 +120,89 @@ function importCrew(file) {
     render();
   };
   reader.readAsText(file);
+}
+
+// ---------- live sync (Cloudflare worker, opportunistic tiny payloads) ----------
+
+function syncBase() {
+  if (!state.sync?.url || !state.sync?.code) return null;
+  return state.sync.url.replace(/\/+$/, "") + "/crew/" + encodeURIComponent(state.sync.code);
+}
+
+async function apiFetch(path, opts) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 3500);
+  try {
+    const res = await fetch(syncBase() + path, {
+      ...opts,
+      signal: ctl.signal,
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// Server wins for other live members; local wins for me, for demo-simulated
+// members while demo is on, and for a locally-dropped Totem pin not yet pushed.
+function mergeServer(sg) {
+  const local = state.group;
+  const byId = Object.fromEntries(local.members.map((m) => [m.id, m]));
+  for (const sm of Object.values(sg.members || {})) {
+    const lm = byId[sm.id];
+    if (!lm) {
+      local.members.push({
+        id: sm.id, name: sm.name || sm.id, color: sm.color || "#8d82a8",
+        lat: sm.lat, lng: sm.lng, ts: sm.ts || 0, demo: false,
+      });
+    } else if (sm.id !== state.meId && !(state.demo && lm.demo)) {
+      if (typeof sm.lat === "number") {
+        lm.lat = sm.lat; lm.lng = sm.lng; lm.ts = sm.ts || lm.ts;
+      }
+    }
+  }
+  if (!local.meetupLocal) local.meetup = sg.meetup ?? null;
+  return sg;
+}
+
+async function syncTick() {
+  if (!syncBase()) return;
+  try {
+    const me = myMember();
+    if (me && me.ts) {
+      await apiFetch("/pos", {
+        method: "POST",
+        body: JSON.stringify({ id: me.id, name: me.name, color: me.color, lat: me.lat, lng: me.lng, ts: me.ts }),
+      });
+    }
+    if (state.group.meetupLocal) {
+      await apiFetch("/meetup", { method: "POST", body: JSON.stringify({ meetup: state.group.meetup }) });
+      state.group.meetupLocal = false;
+    }
+    const server = await apiFetch("");
+    // seed names/colors from the crew file for members the server only knows bare
+    for (const m of state.group.members) {
+      const sm = server.members?.[m.id];
+      if ((!sm || !sm.color) && !seededIdentities.has(m.id)) {
+        seededIdentities.add(m.id);
+        await apiFetch("/member", {
+          method: "POST",
+          body: JSON.stringify({ id: m.id, name: m.name, color: m.color }),
+        });
+      }
+    }
+    mergeServer(server);
+    state.online = true;
+    state.lastSync = Date.now();
+    renderTotemBtn();
+    cacheGroup();
+  } catch {
+    state.online = false; // expected constantly at a festival — keep last-known
+  }
+  renderSyncPill();
 }
 
 // ---------- device sensors ----------
@@ -228,7 +317,18 @@ function renderStatic() {
 
 function renderSyncPill() {
   const pill = el("syncPill");
-  if (state.gpsFix) {
+  if (syncBase()) {
+    if (state.online) {
+      pill.className = "pill live";
+      pill.textContent = "LIVE";
+    } else if (state.lastSync) {
+      pill.className = "pill syncing";
+      pill.textContent = "SYNC " + fmtAgo(state.lastSync).toUpperCase();
+    } else {
+      pill.className = "pill offline";
+      pill.textContent = "OFFLINE";
+    }
+  } else if (state.gpsFix) {
     pill.className = "pill live";
     pill.textContent = "GPS";
   } else if (state.demo) {
@@ -363,9 +463,55 @@ function dropTotem() {
     state.group.meetup = { name: "Totem", lat: me.lat, lng: me.lng };
     state.selectedId = "__meetup__";
   }
+  if (syncBase()) state.group.meetupLocal = true; // wins over server until pushed
   renderTotemBtn();
   cacheGroup();
   render();
+  if (syncBase()) syncTick();
+}
+
+// ---------- sync settings ----------
+
+function openSync() {
+  el("syncUrl").value = state.sync?.url || "";
+  el("syncCode").value = state.sync?.code || "";
+  renderOtrUrls();
+  el("syncDialog").showModal();
+}
+
+function randomCode() {
+  const chars = "abcdefghjkmnpqrstuvwxyz23456789";
+  let c = "";
+  for (let i = 0; i < 16; i++) c += chars[Math.floor(Math.random() * chars.length)];
+  return c;
+}
+
+function renderOtrUrls() {
+  const url = el("syncUrl").value.trim().replace(/\/+$/, "");
+  const code = el("syncCode").value.trim();
+  const holder = el("otrUrls");
+  if (!url || !code) { holder.textContent = ""; return; }
+  holder.innerHTML = "<p>OwnTracks URL per friend (Preferences → Connection → HTTP):</p>";
+  for (const m of state.group.members) {
+    const div = document.createElement("div");
+    div.className = "otr-url";
+    div.textContent = `${m.name}: ${url}/crew/${code}/otr/${m.id}`;
+    holder.appendChild(div);
+  }
+}
+
+function saveSync() {
+  const url = el("syncUrl").value.trim().replace(/\/+$/, "");
+  const code = el("syncCode").value.trim();
+  state.sync = url && code ? { url, code } : null;
+  localStorage.setItem("totem.sync", JSON.stringify(state.sync));
+  state.online = false;
+  state.lastSync = 0;
+  seededIdentities.clear();
+  if (state.sync && state.demo) toggleDemo(); // live sync: demo off by default
+  el("syncDialog").close();
+  renderSyncPill();
+  if (state.sync) syncTick();
 }
 
 function toggleDemo() {
@@ -415,6 +561,12 @@ function boot() {
   el("btnTotem").onclick = dropTotem;
   el("btnDemo").onclick = toggleDemo;
   el("btnWho").onclick = openWho;
+  el("btnSync").onclick = openSync;
+  el("btnGenCode").onclick = () => { el("syncCode").value = randomCode(); renderOtrUrls(); };
+  el("btnSaveSync").onclick = saveSync;
+  el("syncUrl").oninput = renderOtrUrls;
+  el("syncCode").oninput = renderOtrUrls;
+  el("syncDialog").onclick = (e) => { if (e.target === el("syncDialog")) el("syncDialog").close(); };
   el("btnExport").onclick = exportCrew;
   el("btnImport").onclick = () => el("importFile").click();
   el("importFile").onchange = (e) => {
@@ -427,8 +579,10 @@ function boot() {
   startCompass();
 
   setInterval(demoTick, DEMO_MS);
+  setInterval(syncTick, SYNC_MS);
   setInterval(render, 1000);
   demoTick();
+  syncTick();
   render();
 
   if ("serviceWorker" in navigator) {

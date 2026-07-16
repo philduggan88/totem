@@ -66,10 +66,28 @@
   <button id="btnCompassPerm" hidden>🧭 Enable compass</button>
   <button id="btnDemo" class="on">▶ Demo</button>
   <button id="btnWho">☺ I am…</button>
+  <button id="btnSync">⚙ Sync</button>
   <button id="btnExport">⇩ Export crew</button>
   <button id="btnImport">⇧ Import crew</button>
   <input id="importFile" type="file" accept="application/json,.json" hidden>
 </footer>
+
+<dialog id="syncDialog">
+  <h2>Live sync</h2>
+  <p>Point every phone at the same sync worker + crew code and dots go live.
+     Leave blank for local-only mode.</p>
+  <label>Worker URL
+    <input id="syncUrl" type="url" placeholder="https://totem-sync.you.workers.dev" autocomplete="off">
+  </label>
+  <label>Crew code
+    <input id="syncCode" type="text" placeholder="unguessable-code" autocomplete="off">
+  </label>
+  <div class="dialog-row">
+    <button id="btnGenCode">⚄ Generate code</button>
+    <button id="btnSaveSync" class="on">Save</button>
+  </div>
+  <div id="otrUrls"></div>
+</dialog>
 
 <dialog id="whoDialog">
   <h2>Who are you?</h2>
