@@ -101,12 +101,23 @@ function exportCrew() {
 function importCrew(file) {
   const reader = new FileReader();
   reader.onload = () => {
-    const g = JSON.parse(reader.result);
-    if (!g || !Array.isArray(g.members) || !g.members.every((m) => m.id && m.name && m.color)) {
+    let g;
+    try {
+      g = JSON.parse(reader.result);
+    } catch {
+      alert("Not a Totem crew file.");
+      return;
+    }
+    const posOk = (m) =>
+      (typeof m.lat === "number" && typeof m.lng === "number") ||
+      (m.lat == null && m.lng == null);
+    if (!g || !Array.isArray(g.members) ||
+        !g.members.every((m) => m.id && m.name && m.color && posOk(m))) {
       alert("Not a Totem crew file.");
       return;
     }
     state.group = g;
+    if (g.meetup) state.group.meetupLocal = true; // imported pin wins over server until pushed
     if (!g.members.some((m) => m.id === state.meId)) {
       state.meId = g.members[0].id;
       localStorage.setItem("totem.me", state.meId);
@@ -154,10 +165,14 @@ function mergeServer(sg) {
   for (const sm of Object.values(sg.members || {})) {
     const lm = byId[sm.id];
     if (!lm) {
-      local.members.push({
+      const nm = {
         id: sm.id, name: sm.name || sm.id, color: sm.color || "#8d82a8",
-        lat: sm.lat, lng: sm.lng, ts: sm.ts || 0, demo: false,
-      });
+        ts: sm.ts || 0, demo: false,
+      };
+      if (typeof sm.lat === "number" && typeof sm.lng === "number") {
+        nm.lat = sm.lat; nm.lng = sm.lng;
+      }
+      local.members.push(nm); // no fix yet -> no coords; targets() leaves them off the compass
     } else if (sm.id !== state.meId && !(state.demo && lm.demo)) {
       if (typeof sm.lat === "number") {
         lm.lat = sm.lat; lm.lng = sm.lng; lm.ts = sm.ts || lm.ts;
@@ -231,7 +246,7 @@ function startGeolocation() {
 
 function onOrientation(e) {
   if (typeof e.webkitCompassHeading === "number") {
-    state.heading = e.webkitCompassHeading; // iOS: already true heading
+    state.heading = e.webkitCompassHeading; // iOS: magnetic heading (magnetic-vs-true drift accepted)
   } else if (e.absolute && typeof e.alpha === "number") {
     state.heading = (360 - e.alpha) % 360;
   }
@@ -296,9 +311,10 @@ function demoTick() {
 const el = (id) => document.getElementById(id);
 
 function targets() {
-  // everything the compass can point at: friends (not me) + meetup pin
+  // everything the compass can point at: friends (not me) + meetup pin;
+  // members without coords yet (synced in before any fix) can't be pointed at
   const list = state.group.members
-    .filter((m) => m.id !== state.meId)
+    .filter((m) => m.id !== state.meId && typeof m.lat === "number" && typeof m.lng === "number")
     .map((m) => ({ ...m, kind: "friend" }));
   if (state.group.meetup) {
     list.push({
@@ -358,6 +374,19 @@ function ensureDots(list) {
   }
 }
 
+// Continuous heading for CSS rotations: the transforms transition, so jumping
+// the absolute value 359° -> 1° animates the long way round. Accumulate the
+// wrapped delta instead so crossing north is a 2° move, not a 358° spin.
+let contHeading = 0;
+let lastRawHeading = null;
+
+function continuousHeading(raw) {
+  if (lastRawHeading === null) contHeading = raw;
+  else contHeading += ((raw - lastRawHeading + 540) % 360) - 180;
+  lastRawHeading = raw;
+  return contHeading;
+}
+
 function render() {
   if (!state.group) return;
   const me = myMember();
@@ -365,7 +394,7 @@ function render() {
   const list = targets();
   ensureDots(list);
 
-  const heading = state.heading ?? 0;
+  const heading = continuousHeading(state.heading ?? 0);
   el("dial").style.transform = `rotate(${-heading}deg)`;
 
   const wrap = el("compassWrap");
@@ -388,7 +417,6 @@ function render() {
     d.classList.toggle("far", dist > 400);
     d.classList.toggle("stale", t.kind === "friend" && (!t.ts || Date.now() - t.ts > STALE_MS));
     d.querySelector(".tag").textContent = t.name;
-    d.querySelector(".tag").style.transform = `rotate(${-heading}deg)`;
   }
 
   // center readout
@@ -463,7 +491,7 @@ function dropTotem() {
     state.group.meetup = { name: "Totem", lat: me.lat, lng: me.lng };
     state.selectedId = "__meetup__";
   }
-  if (syncBase()) state.group.meetupLocal = true; // wins over server until pushed
+  state.group.meetupLocal = true; // wins over server until pushed — even if sync isn't configured yet
   renderTotemBtn();
   cacheGroup();
   render();
